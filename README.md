@@ -135,7 +135,7 @@ Variables (`Variables` tab):
 | Name | Value |
 | --- | --- |
 | `GCP_PROJECT_ID` | `ci-loop-smoke` |
-| `GCP_RESULTS_BUCKET` | Optional. GCS bucket for raw results (bare name, e.g. `my-results-bucket`; a `gs://` prefix is accepted and stripped). If omitted, gcloud uses its default results bucket and the raw-result download step is skipped. |
+| `GCP_RESULTS_BUCKET` | Optional, **billing-enabled projects only**: a GCS bucket for raw results (bare name, e.g. `my-results-bucket`; a `gs://` prefix is accepted and stripped), which incurs Cloud Storage charges. The current no-billing smoke project leaves this **unset** — gcloud uses Test Lab's managed default results bucket and the raw-result download step is skipped. |
 
 The Google Cloud side (WIF pool/provider, service account, IAM bindings, results
 bucket) is **external setup done by the operator/Codex**, not by this workflow or
@@ -147,23 +147,47 @@ the agent; the workflow only consumes it. Outline:
    (`issuer: https://token.actions.githubusercontent.com`, audience
    `https://iam.googleapis.com/projects/<PROJECT_NUMBER>/locations/global/workloadIdentityPools/<POOL_ID>`),
    restricted to this repository.
-3. Create a service account and grant it the Firebase Test Lab role
-   (`roles/cloudtestservice.testAdmin` or `roles/firebase.admin`) plus write access
-   to the results bucket (e.g. `roles/storage.objectAdmin` on that bucket).
+3. Create a service account and grant it these project roles:
+   - `roles/cloudtestservice.testAdmin` — lets the account create and run Test Lab
+     test matrices.
+   - `roles/editor` — **required only for the current no-billing setup.** With no
+     billing enabled, Test Lab uses its own managed *default results bucket*, and
+     uploading the APK to that bucket needs project-level object-write permission
+     that `testAdmin` alone does not include (`storage.objects.create` is denied).
+     `roles/editor` supplies it so the default-bucket upload succeeds. This is a
+     compatibility necessity of the no-billing smoke project, not a general
+     recommendation.
 4. Allow the pool's GitHub principal to impersonate the service account
    (`roles/iam.workloadIdentityUser` on the SA for the repo's principal set).
+
+**Billing and the results bucket**
+
+- A custom results bucket (`GCP_RESULTS_BUCKET`) must belong to a project with
+  billing enabled, and it incurs Cloud Storage charges.
+- The current smoke project stays **no-billing**, so it does **not** set
+  `GCP_RESULTS_BUCKET`: it lets Test Lab use its managed default results bucket,
+  does not download raw GCS results, and keeps only the `gcloud` log artifact plus
+  the Firebase Console link.
+- **Least privilege:** `roles/editor` is broad. For a production or long-lived
+  project, enable billing, use a dedicated results bucket (grant the SA
+  `roles/storage.objectAdmin` scoped to that bucket), and then remove
+  `roles/editor` so the account keeps only `roles/cloudtestservice.testAdmin` plus
+  the bucket-scoped storage role.
 
 ### Viewing Test Lab results / failure logs
 
 - **Workflow log:** Actions run → job **Firebase Test Lab (Robo)** → step
   **Run Robo test in Firebase Test Lab**. The full `gcloud` output is there and in
   `gcloud-testlab.log`.
-- **Artifact:** download `firebase-test-lab-results` — it contains the gcloud log
-  and, if a results bucket is set, the raw Robo results (e.g. `test_result_*.xml`,
-  logcat, video).
-- **GCS:** raw results are under `gs://<GCP_RESULTS_BUCKET>/robo-<run_id>-<attempt>/`.
+- **Artifact:** download `firebase-test-lab-results`. In the current no-billing
+  setup it contains the `gcloud` log only (the raw Robo files stay in Test Lab's
+  managed default bucket). With a custom `GCP_RESULTS_BUCKET` on a billing-enabled
+  project it also contains the raw Robo results (e.g. `test_result_*.xml`, logcat,
+  video).
+- **GCS (custom bucket only):** raw results are under
+  `gs://<GCP_RESULTS_BUCKET>/robo-<run_id>-<attempt>/`.
 - **Console:** `gcloud` prints a Firebase console link to the matrix run in its
-  output.
+  output; in default-bucket mode this link is how you inspect the raw results.
 
 ## Design notes
 
