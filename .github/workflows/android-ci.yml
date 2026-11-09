@@ -144,6 +144,76 @@ jobs:
           # step, and therefore the job and the workflow.
           exit "${status}"
 
+      - name: Write Test Lab metadata (machine-readable)
+        # Always run, even when earlier steps failed, so a run that fails before
+        # the device test still produces an explicit (non-fabricated) record.
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p testlab-logs
+          python3 - <<'PY'
+          import datetime, json, os, re
+
+          log_path = "testlab-logs/gcloud-testlab.log"
+          exit_raw = os.environ.get("TESTLAB_EXIT", "").strip()
+
+          def to_int(value):
+              try:
+                  return int(value)
+              except (TypeError, ValueError):
+                  return None
+
+          meta = {
+              "invoked": False,
+              "matrixId": None,
+              "testStarted": False,
+              "testFinished": False,
+              "roboPassed": False,
+              "gcloudExitCode": to_int(exit_raw),
+              "device": None,
+              "runId": to_int(os.environ.get("GITHUB_RUN_ID", "")),
+              "runAttempt": to_int(os.environ.get("GITHUB_RUN_ATTEMPT", "")),
+              "logPresent": False,
+              "recordedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              "note": None,
+          }
+
+          try:
+              with open(log_path, encoding="utf-8", errors="replace") as handle:
+                  log = handle.read()
+          except FileNotFoundError:
+              meta["note"] = "gcloud-testlab.log not found; Test Lab step likely did not run."
+          else:
+              meta["logPresent"] = True
+              meta["invoked"] = bool(
+                  re.search(r"Uploading .* to Firebase Test Lab|Test \[matrix-|Firebase Test Lab will execute", log)
+              )
+              matrix = re.search(r"Test \[(matrix-[^\]]+)\]", log)
+              if matrix:
+                  meta["matrixId"] = matrix.group(1)
+              meta["testStarted"] = bool(re.search(r"Test is Running|Starting attempt \d+", log))
+              meta["testFinished"] = bool(re.search(r"Test is Finished|Robo testing complete", log))
+              passed = re.search(r"│\s*Passed\s*│\s*([^│]+?)\s*│", log)
+              failed = re.search(r"│\s*(Failed|Inconclusive|Flaky)\s*│\s*([^│]+?)\s*│", log)
+              if passed:
+                  meta["roboPassed"] = True
+                  meta["device"] = passed.group(1).strip()
+              elif failed:
+                  meta["roboPassed"] = False
+                  meta["device"] = failed.group(2).strip()
+              if not meta["invoked"]:
+                  meta["note"] = "Test Lab was not invoked (no upload/test markers in log)."
+              elif not meta["testStarted"]:
+                  meta["note"] = "Test Lab invoked but the device test never started."
+              elif not meta["testFinished"]:
+                  meta["note"] = "Test started but no completion marker found."
+
+          with open("testlab-logs/testlab-meta.json", "w", encoding="utf-8") as out:
+              json.dump(meta, out, indent=2, ensure_ascii=False)
+              out.write("\n")
+          print(json.dumps(meta, indent=2))
+          PY
+
       - name: Download Test Lab raw results
         # Run even when the Robo step failed, so failure artifacts are captured.
         if: ${{ always() && env.GCP_RESULTS_BUCKET != '' }}
