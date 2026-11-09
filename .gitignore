@@ -1,0 +1,25 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Android / local SDK configuration
+local.properties
+*.iml
+.idea/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Build outputs (APKs and other artifacts are never committed)
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+output.json
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.log

@@ -1,0 +1,45 @@
+plugins {
+    id 'com.android.application'
+}
+
+// AGP 9 ships built-in Kotlin and adds kotlin-stdlib to every runtime classpath.
+// This project is pure Java and references no Kotlin, so drop it to keep the APK
+// as small as possible (no third-party runtime dependencies are needed).
+configurations.configureEach {
+    exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib'
+    exclude group: 'org.jetbrains', module: 'annotations'
+}
+
+android {
+    namespace 'com.pencilerly.ciloopsmoke'
+    compileSdk 36
+    buildToolsVersion '36.0.0'
+
+    defaultConfig {
+        applicationId 'com.pencilerly.ciloopsmoke'
+        minSdk 26
+        targetSdk 36
+        versionCode 1
+        versionName '1.0.0'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+}

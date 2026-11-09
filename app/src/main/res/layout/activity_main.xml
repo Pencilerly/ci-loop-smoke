@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#FF102030">
+
+    <TextView
+        android:id="@+id/scoreText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:padding="24dp"
+        android:textColor="#FFFFFFFF"
+        android:textSize="28sp"
+        android:text="@string/score_label" />
+
+    <Button
+        android:id="@+id/targetButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:minWidth="96dp"
+        android:minHeight="96dp"
+        android:text="@string/target_label"
+        android:textSize="20sp" />
+
+</FrameLayout>
