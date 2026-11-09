@@ -85,14 +85,85 @@ Windows:
 
 ## CI
 
-`.github/workflows/android-ci.yml` runs on every `push` and `pull_request`:
+`.github/workflows/android-ci.yml` runs on every `push` and `pull_request` and has
+two jobs:
 
-```bash
-./gradlew testDebugUnitTest assembleDebug --no-daemon --stacktrace
-```
+1. **build** — sets up JDK 17 + Gradle, runs the existing JVM unit tests and debug
+   build, and uploads the debug APK as the `app-debug-apk` artifact:
 
-It sets up JDK 17 and Gradle, uploads the debug APK as the `app-debug-apk`
-artifact, and uploads test reports when the build fails.
+   ```bash
+   ./gradlew testDebugUnitTest assembleDebug --no-daemon --stacktrace
+   ```
+
+   Test reports are uploaded as `test-reports` when the job fails. Unit tests are
+   never shortened or skipped.
+
+2. **firebase-test-lab** — `needs: build`. It downloads the *same* `app-debug-apk`
+   artifact (no rebuild), authenticates keylessly to Google Cloud via GitHub OIDC +
+   Workload Identity Federation, and runs a Robo test:
+
+   ```bash
+   gcloud firebase test android run \
+     --project "$GCP_PROJECT_ID" \
+     --app "<downloaded app-debug.apk>" \
+     --type robo \
+     --device model=MediumPhone.arm,version=35,locale=en,orientation=portrait \
+     --timeout 3m \
+     --no-auto-google-login
+   ```
+
+   A non-zero exit from `gcloud` fails the step, the job, and therefore the whole
+   workflow. The gcloud log and (when a results bucket is configured) the raw Test
+   Lab results are uploaded as the `firebase-test-lab-results` artifact.
+
+### Firebase Test Lab: first-time setup
+
+The Test Lab job is **gated**: if the two credential secrets are not set it is
+skipped with a notice. Once they are set it runs for real (no mock).
+
+Configure these under **Repository → Settings → Secrets and variables → Actions**.
+
+Secrets (`Secrets` tab):
+
+| Name | Value |
+| --- | --- |
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | `projects/<PROJECT_NUMBER>/locations/global/workloadIdentityPools/<POOL_ID>/providers/<PROVIDER_ID>` |
+| `GCP_SERVICE_ACCOUNT` | `<SA_NAME>@<PROJECT_ID>.iam.gserviceaccount.com` |
+
+Variables (`Variables` tab):
+
+| Name | Value |
+| --- | --- |
+| `GCP_PROJECT_ID` | `ci-loop-smoke` |
+| `GCP_RESULTS_BUCKET` | Optional. GCS bucket for raw results (bare name, e.g. `my-results-bucket`; a `gs://` prefix is accepted and stripped). If omitted, gcloud uses its default results bucket and the raw-result download step is skipped. |
+
+The Google Cloud side (WIF pool/provider, service account, IAM bindings, results
+bucket) is **external setup done by the operator/Codex**, not by this workflow or
+the agent; the workflow only consumes it. Outline:
+
+1. Enable APIs on project `ci-loop-smoke`: Cloud Testing API and Cloud Tool Results
+   API (and IAM/STS for Workload Identity Federation).
+2. Create a Workload Identity Pool + OIDC provider for GitHub
+   (`issuer: https://token.actions.githubusercontent.com`, audience
+   `https://iam.googleapis.com/projects/<PROJECT_NUMBER>/locations/global/workloadIdentityPools/<POOL_ID>`),
+   restricted to this repository.
+3. Create a service account and grant it the Firebase Test Lab role
+   (`roles/cloudtestservice.testAdmin` or `roles/firebase.admin`) plus write access
+   to the results bucket (e.g. `roles/storage.objectAdmin` on that bucket).
+4. Allow the pool's GitHub principal to impersonate the service account
+   (`roles/iam.workloadIdentityUser` on the SA for the repo's principal set).
+
+### Viewing Test Lab results / failure logs
+
+- **Workflow log:** Actions run → job **Firebase Test Lab (Robo)** → step
+  **Run Robo test in Firebase Test Lab**. The full `gcloud` output is there and in
+  `gcloud-testlab.log`.
+- **Artifact:** download `firebase-test-lab-results` — it contains the gcloud log
+  and, if a results bucket is set, the raw Robo results (e.g. `test_result_*.xml`,
+  logcat, video).
+- **GCS:** raw results are under `gs://<GCP_RESULTS_BUCKET>/robo-<run_id>-<attempt>/`.
+- **Console:** `gcloud` prints a Firebase console link to the matrix run in its
+  output.
 
 ## Design notes
 
@@ -103,5 +174,6 @@ artifact, and uploads test reports when the build fails.
 - No Flutter / Unity / AndroidX / external image resources are used.
 - Generated outputs (`build/`, `.gradle/`, APKs, `local.properties`) are ignored by
   `.gitignore`; the debug APK is only a build artifact and is never committed.
-- This stage performs **only** the GitHub Actions build; Firebase Test Lab and any
-  credentials are intentionally out of scope.
+- The Firebase Test Lab job uses keyless OIDC (no service-account JSON key) and the
+  existing `ci-loop-smoke` cloud project; it adds no Firebase SDK and no
+  third-party runtime dependency to the app.
